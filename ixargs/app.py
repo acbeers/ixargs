@@ -22,19 +22,26 @@ from ixargs.runner import run_capture_streaming
 HELP_MARKDOWN = """
 # ixargs shortcuts
 
+**Input list** (focus on left/top panel):
 | Key | Action |
 |-----|--------|
-| `j` / `↓` | Next line |
-| `k` / `↑` | Previous line |
+| `j` / `k` / `↑` / `↓` | Next / previous line |
+
+**Output panel** (scroll output from anywhere):
+| Key | Action |
+|-----|--------|
 | ` ` (space) | Next page |
 | `b` | Previous page |
 | `<` | Top of output |
 | `>` | Bottom of output |
+
+**Global:**
+| Key | Action |
+|-----|--------|
 | `q` | Quit |
 | `?` | This help |
 | `/` | Search |
-| `n` | Search next |
-| `N` | Search previous |
+| `n` / `N` | Search next / previous |
 """
 
 
@@ -62,9 +69,11 @@ def make_list_content(lines: list[str], index: int, width: int) -> Text:
 
 
 class ListScrollContainer(VerticalScroll):
-    """VerticalScroll that delegates up/down arrow keys to the app for line selection."""
+    """VerticalScroll that handles j/k/up/down for line selection (input list)."""
 
     BINDINGS = [
+        Binding("j", "line_down", "Down", show=False),
+        Binding("k", "line_up", "Up", show=False),
         Binding("down", "line_down", "Down", show=False),
         Binding("up", "line_up", "Up", show=False),
     ]
@@ -100,6 +109,48 @@ class ListPanel(Static):
         self.refresh()
 
 
+class OutputScrollContainer(VerticalScroll):
+    """VerticalScroll that handles space/b/</> for output panel scrolling."""
+
+    BINDINGS = [
+        Binding("space", "page_down", "Page down", show=False),
+        Binding("b", "page_up", "Page up", show=False),
+        Binding("<", "scroll_home", "Top", show=False),
+        Binding(">", "scroll_end", "Bottom", show=False),
+    ]
+
+    def _mark_scrolling(self) -> None:
+        """Notify app that user is scrolling."""
+        if hasattr(self.app, "_mark_user_scrolling"):
+            self.app._mark_user_scrolling()
+
+    def action_page_down(self) -> None:
+        self._mark_scrolling()
+        self.scroll_page_down(animate=False)
+
+    def action_page_up(self) -> None:
+        self._mark_scrolling()
+        self.scroll_page_up(animate=False)
+
+    def action_scroll_home(self) -> None:
+        self._mark_scrolling()
+        self.scroll_home(animate=False, immediate=True)
+
+    def action_scroll_end(self) -> None:
+        self._mark_scrolling()
+        self.scroll_end(animate=False, immediate=True)
+
+    def action_scroll_down(self) -> None:
+        """Override default scroll_down to mark scrolling."""
+        self._mark_scrolling()
+        super().action_scroll_down()
+
+    def action_scroll_up(self) -> None:
+        """Override default scroll_up to mark scrolling."""
+        self._mark_scrolling()
+        super().action_scroll_up()
+
+
 class OutputPanel(Static):
     """Right/bottom panel showing command output."""
 
@@ -133,14 +184,10 @@ class IxargsApp(App[None]):
     BINDINGS = [
         ("q", "quit", "Quit"),
         ("?", "help", "Help"),
-        Binding("j", "line_down", "Down", show=False),
-        Binding("k", "line_up", "Up", show=False),
-        Binding("down", "line_down", "Down", show=False),
-        Binding("up", "line_up", "Up", show=False),
-        Binding("space", "page_down", "Page down", show=False),
-        Binding("b", "page_up", "Page up", show=False),
-        Binding("<", "output_top", "Top", show=False),
-        Binding(">", "output_bottom", "Bottom", show=False),
+        Binding("space", "output_page_down", "Output page down", show=False),
+        Binding("b", "output_page_up", "Output page up", show=False),
+        Binding("<", "output_top", "Output top", show=False),
+        Binding(">", "output_bottom", "Output bottom", show=False),
         Binding("/", "search", "Search", show=False),
         Binding("n", "search_next", "Next", show=False),
         Binding("N", "search_prev", "Prev", show=False),
@@ -165,6 +212,8 @@ class IxargsApp(App[None]):
         self._search_query: str | None = None
         self._search_matches: list[int] = []
         self._search_index = 0
+        self._user_scrolling = False
+        self._last_scroll_time = 0.0
 
     def compose(self) -> ComposeResult:
         root: Horizontal | Vertical
@@ -174,7 +223,7 @@ class IxargsApp(App[None]):
                     ListPanel(self.lines, 0, id="list-panel"),
                     id="list-scroll",
                 ),
-                VerticalScroll(
+                OutputScrollContainer(
                     OutputPanel(id="output-panel"),
                     id="output-scroll",
                 ),
@@ -187,7 +236,7 @@ class IxargsApp(App[None]):
                     ListPanel(self.lines, 0, id="list-panel"),
                     id="list-scroll",
                 ),
-                VerticalScroll(
+                OutputScrollContainer(
                     OutputPanel(id="output-panel"),
                     id="output-scroll",
                 ),
@@ -198,7 +247,8 @@ class IxargsApp(App[None]):
         yield Footer()
 
     def on_mount(self) -> None:
-        list_scroll = self.query_one("#list-scroll", VerticalScroll)
+        list_scroll = self.query_one("#list-scroll", ListScrollContainer)
+        self.set_focus(list_scroll)
         if self.horizontal:
             if self.list_size is None:
                 # Auto fit: size list panel to content width (line numbers + longest line), capped by CSS max-width 50%
@@ -223,21 +273,30 @@ class IxargsApp(App[None]):
         cmd_line = " $ " + " ".join(cmd) + "\n\n"
         chunks: list[str] = [cmd_line]
         last_update: list[float] = [0.0]
-        throttle_sec = 0.05
+        throttle_sec = 0.15  # Increased from 0.05 to reduce update frequency
+        skipped_updates: list[int] = [0]
 
-        def schedule_update() -> None:
+        def schedule_update(force: bool = False) -> None:
+            # Skip update if user is actively scrolling (unless forced final update)
+            if not force and self._user_scrolling:
+                skipped_updates[0] += 1
+                return
+            
             full = "".join(chunks)
             try:
                 loop.call_soon_threadsafe(
                     lambda: self._set_output_if_current(full, rid, idx)
                 )
+                skipped_updates[0] = 0
             except RuntimeError:
                 pass  # Loop may be closed during shutdown
 
         def on_chunk(s: str) -> None:
             chunks.append(s)
             now = time.monotonic()
-            if now - last_update[0] >= throttle_sec:
+            # More aggressive throttling: increase interval if updates are being skipped
+            effective_throttle = throttle_sec * (1 + min(skipped_updates[0] * 0.5, 3))
+            if now - last_update[0] >= effective_throttle:
                 last_update[0] = now
                 schedule_update()
 
@@ -246,7 +305,7 @@ class IxargsApp(App[None]):
                 run_capture_streaming(cmd, on_chunk, cancel_event=self._cancel_run)
             except Exception as e:
                 chunks.append(f"(error)\n{e!s}")
-            schedule_update()  # Final update (catches throttled tail + errors)
+            schedule_update(force=True)  # Final update (catches throttled tail + errors)
 
         await asyncio.to_thread(run_streaming)
 
@@ -309,48 +368,54 @@ class IxargsApp(App[None]):
 
     def _scroll_list_to(self, index: int) -> None:
         try:
-            scroll = self.query_one("#list-scroll", VerticalScroll)
+            scroll = self.query_one("#list-scroll", ListScrollContainer)
             scroll.scroll_to(y=index, animate=False)
         except Exception:
             pass
 
-    def action_page_down(self) -> None:
-        lp = self.query_one("#list-panel", ListPanel)
-        try:
-            scroll = self.query_one("#list-scroll", VerticalScroll)
-            h = scroll.size.height if scroll.size else 20
-        except Exception:
-            h = 20
-        n = min(len(self.lines) - 1, lp.index + max(1, h))
-        if n != lp.index:
-            lp.set_index(n)
-            self._scroll_list_to(n)
-            self.run_cmd_for_index(n)
+    def _mark_user_scrolling(self) -> None:
+        """Mark that user is actively scrolling; pause output updates briefly."""
+        self._user_scrolling = True
+        self._last_scroll_time = time.monotonic()
+        # Schedule a check to clear the flag after user stops scrolling
+        self.set_timer(0.3, self._check_scroll_idle)
 
-    def action_page_up(self) -> None:
-        lp = self.query_one("#list-panel", ListPanel)
+    def _check_scroll_idle(self) -> None:
+        """Clear scrolling flag if user hasn't scrolled recently."""
+        if time.monotonic() - self._last_scroll_time >= 0.25:
+            self._user_scrolling = False
+
+    def action_output_page_down(self) -> None:
+        self._mark_user_scrolling()
         try:
-            scroll = self.query_one("#list-scroll", VerticalScroll)
-            h = scroll.size.height if scroll.size else 20
+            self.query_one("#output-scroll", OutputScrollContainer).scroll_page_down(
+                animate=False
+            )
         except Exception:
-            h = 20
-        n = max(0, lp.index - max(1, h))
-        if n != lp.index:
-            lp.set_index(n)
-            self._scroll_list_to(n)
-            self.run_cmd_for_index(n)
+            pass
+
+    def action_output_page_up(self) -> None:
+        self._mark_user_scrolling()
+        try:
+            self.query_one("#output-scroll", OutputScrollContainer).scroll_page_up(
+                animate=False
+            )
+        except Exception:
+            pass
 
     def action_output_top(self) -> None:
+        self._mark_user_scrolling()
         try:
-            self.query_one("#output-scroll", VerticalScroll).scroll_home(
+            self.query_one("#output-scroll", OutputScrollContainer).scroll_home(
                 animate=False, immediate=True
             )
         except Exception:
             pass
 
     def action_output_bottom(self) -> None:
+        self._mark_user_scrolling()
         try:
-            self.query_one("#output-scroll", VerticalScroll).scroll_end(
+            self.query_one("#output-scroll", OutputScrollContainer).scroll_end(
                 animate=False, immediate=True
             )
         except Exception:
