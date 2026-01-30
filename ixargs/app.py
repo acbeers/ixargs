@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+import threading
+import time
 from typing import Callable
 
 from rich.text import Text
@@ -14,7 +16,7 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Footer, Markdown, Static
 
-from ixargs.runner import run_capture
+from ixargs.runner import run_capture_streaming
 
 
 HELP_MARKDOWN = """
@@ -159,6 +161,7 @@ class IxargsApp(App[None]):
         self.horizontal = horizontal
         self.list_size = list_size
         self._run_id = 0
+        self._cancel_run = threading.Event()
         self._search_query: str | None = None
         self._search_matches: list[int] = []
         self._search_index = 0
@@ -215,21 +218,44 @@ class IxargsApp(App[None]):
         self.run_cmd_for_index(0)
 
     async def _run_capture_and_show(self, cmd: list[str], rid: int, idx: int) -> None:
-        """Run command in thread pool, then update output panel from main loop."""
-        try:
-            out = await asyncio.to_thread(run_capture, cmd)
-        except Exception as e:
-            out = f"(error)\n{e!s}"
-        if rid != self._run_id:
-            return
+        """Run command in thread pool, streaming output to the UI as it arrives."""
+        loop = asyncio.get_running_loop()
         cmd_line = " $ " + " ".join(cmd) + "\n\n"
-        self._set_output(cmd_line + out, idx)
+        chunks: list[str] = [cmd_line]
+        last_update: list[float] = [0.0]
+        throttle_sec = 0.05
+
+        def schedule_update() -> None:
+            full = "".join(chunks)
+            try:
+                loop.call_soon_threadsafe(
+                    lambda: self._set_output_if_current(full, rid, idx)
+                )
+            except RuntimeError:
+                pass  # Loop may be closed during shutdown
+
+        def on_chunk(s: str) -> None:
+            chunks.append(s)
+            now = time.monotonic()
+            if now - last_update[0] >= throttle_sec:
+                last_update[0] = now
+                schedule_update()
+
+        def run_streaming() -> None:
+            try:
+                run_capture_streaming(cmd, on_chunk, cancel_event=self._cancel_run)
+            except Exception as e:
+                chunks.append(f"(error)\n{e!s}")
+            schedule_update()  # Final update (catches throttled tail + errors)
+
+        await asyncio.to_thread(run_streaming)
 
     def run_cmd_for_index(self, index: int) -> None:
         line = self.lines[index]
         cmd = self.cmd_for_line(line)
         out_panel = self.query_one("#output-panel", OutputPanel)
         out_panel.set_output(" $ " + " ".join(cmd) + "\n\nRunning...")
+        self._cancel_run.clear()
         self._run_id += 1
         rid = self._run_id
         self.run_worker(
@@ -237,6 +263,15 @@ class IxargsApp(App[None]):
             exclusive=False,
             group="run",
         )
+
+    def _set_output_if_current(self, text: str, rid: int, idx: int | None) -> None:
+        """Update output panel only if this run is still current."""
+        if rid != self._run_id:
+            return
+        try:
+            self._set_output(text, idx)
+        except Exception:
+            pass  # App may be shutting down; ignore widget update errors
 
     def _set_output(self, text: str, idx: int | None) -> None:
         out_panel = self.query_one("#output-panel", OutputPanel)
@@ -248,6 +283,7 @@ class IxargsApp(App[None]):
                 self._search_query = None
 
     def action_quit(self) -> None:
+        self._cancel_run.set()  # Signal runner to kill subprocess for fast exit
         self.exit()
 
     def action_help(self) -> None:
