@@ -1,10 +1,20 @@
-/* List panel: fixed width when horizontal, flexible when vertical */
+/* Vertical: both panels take full width */
 #list-scroll {
   width: 1fr;
   min-width: 24;
 }
 
 #output-scroll {
+  width: 1fr;
+}
+
+/* Horizontal: list panel sizes to content, output gets the rest; list never > 50% */
+.horizontal #list-scroll {
+  width: auto;
+  max-width: 50%;
+}
+
+.horizontal #output-scroll {
   width: 1fr;
 }
 

@@ -159,6 +159,7 @@ class IxargsApp(App[None]):
                     id="output-scroll",
                 ),
                 id="root",
+                classes="horizontal",
             )
         else:
             root = Vertical(
@@ -171,11 +172,19 @@ class IxargsApp(App[None]):
                     id="output-scroll",
                 ),
                 id="root",
+                classes="vertical",
             )
         yield root
         yield Footer()
 
     def on_mount(self) -> None:
+        if self.horizontal:
+            # Size list panel to content width (line numbers + longest line), capped by CSS max-width 50%
+            content_width = 20  # minimum for "   1 " + short line
+            for line in self.lines:
+                content_width = max(content_width, 5 + len(line))
+            list_scroll = self.query_one("#list-scroll", VerticalScroll)
+            list_scroll.styles.min_width = content_width
         self.run_cmd_for_index(0)
 
     async def _run_capture_and_show(self, cmd: list[str], rid: int, idx: int) -> None:
