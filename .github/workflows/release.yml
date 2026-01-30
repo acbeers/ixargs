@@ -1,0 +1,80 @@
+# Build packaged binaries and create a GitHub release on version tags.
+# Usage: git tag v0.1.0 && git push origin v0.1.0
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            artifact_name: ixargs-darwin-arm64
+            archive_name: ixargs-${{ github.ref_name }}-darwin-arm64.tar.gz
+          - os: ubuntu-24.04
+            artifact_name: ixargs-linux-x86_64
+            archive_name: ixargs-${{ github.ref_name }}-linux-x86_64.tar.gz
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Build with PyInstaller
+        run: pyinstaller ixargs.spec
+
+      - name: Prepare archive
+        run: |
+          # onedir: dist/ixargs/ has the exe + deps; ship as single top-level dir in tarball
+          mkdir -p dist-pkg && mv dist/ixargs dist-pkg/ixargs
+          tar czf "${{ matrix.archive_name }}" -C dist-pkg ixargs
+          mkdir -p dist && mv "${{ matrix.archive_name }}" dist/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: dist/${{ matrix.archive_name }}
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+
+      - name: Flatten artifacts for release
+        run: |
+          mkdir -p release-files
+          find release-artifacts -name "*.tar.gz" -exec cp {} release-files/ \;
+          ls -la release-files/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: false
+          generate_release_notes: true
+          files: release-files/*.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

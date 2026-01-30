@@ -1,0 +1,17 @@
+/* List panel: fixed width when horizontal, flexible when vertical */
+#list-scroll {
+  width: 1fr;
+  min-width: 24;
+}
+
+#output-scroll {
+  width: 1fr;
+}
+
+#list-panel {
+  padding: 1 0 0 1;
+}
+
+#output-panel {
+  padding: 1 1 0 1;
+}
