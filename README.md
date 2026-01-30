@@ -8,12 +8,31 @@ some_tool | ixargs [options] cmd [args...]
 
 For each line of stdin, ixargs runs `cmd` with the arguments and the line as the last argument (or replaced via `-I`). The UI shows the input list and command output side by side. Move between lines to run the command with different inputs; output supports scrolling and preserves color.
 
-## Requirements
+## Installation
+
+### Homebrew (macOS)
+
+```bash
+brew tap YOUR_USERNAME/tap
+brew install ixargs
+```
+
+### pip / pipx
+
+```bash
+pip install ixargs
+# or for isolated install
+pipx install ixargs
+```
+
+## Development Setup
+
+### Requirements
 
 - Python 3.13+
 - [uv](https://docs.astral.sh/uv/) for environment management
 
-## Setup
+### Setup
 
 ```bash
 uv sync
@@ -66,22 +85,11 @@ After ixargs options, the first remaining argument is the command; everything af
 
 ## Distribution
 
-### Binaries (GitHub Releases)
-
-Tag a release to build packaged binaries and create a GitHub release:
-
-```bash
-git tag v0.1.0
-git push origin v0.1.0
-```
-
-The [release workflow](.github/workflows/release.yml) builds with PyInstaller (onedir) on macOS (arm64) and Linux (x86_64), then uploads tarballs to the release. Download `ixargs-<version>-darwin-arm64.tar.gz` or `ixargs-<version>-linux-x86_64.tar.gz`, extract (you get an `ixargs/` directory), and run `./ixargs/ixargs`.
-
-### Homebrew (macOS, Apple Silicon)
+### Homebrew (Recommended for macOS)
 
 1. Copy [Formula/ixargs.rb](Formula/ixargs.rb) into a Homebrew tap (e.g. your own repo or fork).
 2. Replace `REPO_OWNER` in the formula with your GitHub username or org.
-3. After the first release, set the real `sha256` (run `shasum -a 256` on the downloaded tarball).
+3. After the first release, update the `sha256` checksum in the formula (run `shasum -a 256` on the downloaded tarball).
 4. Users can then tap and install:
 
    ```bash
@@ -89,14 +97,36 @@ The [release workflow](.github/workflows/release.yml) builds with PyInstaller (o
    brew install ixargs
    ```
 
-Intel Macs have no pre-built binary; use `pip install ixargs` or build from source.
+The Homebrew formula installs ixargs in an isolated Python virtualenv and symlinks the binary to your PATH.
 
-### Local PyInstaller build
+### PyPI (All platforms)
+
+Install directly with pip or pipx:
 
 ```bash
-uv sync --extra dev
-pyinstaller ixargs.spec
-# onedir output: dist/ixargs/ (run dist/ixargs/ixargs)
+pip install ixargs
+# or with pipx for isolated install
+pipx install ixargs
+```
+
+### Creating a release
+
+Tag a release to build the source distribution and create a GitHub release:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The [release workflow](.github/workflows/release.yml) builds a source distribution tarball and uploads it to the GitHub release. The same tarball is used by both Homebrew and PyPI.
+
+### Local Testing
+
+To test building the source distribution locally:
+
+```bash
+uv build --sdist
+# Output will be in dist/ixargs-VERSION.tar.gz
 ```
 
 ## License

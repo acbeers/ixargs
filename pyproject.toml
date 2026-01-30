@@ -12,11 +12,6 @@ dependencies = [
     "textual>=7.4.0",
 ]
 
-[project.optional-dependencies]
-dev = [
-    "pyinstaller>=6.0.0",
-]
-
 [project.scripts]
 ixargs = "ixargs.cli:main"
 
