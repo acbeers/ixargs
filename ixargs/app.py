@@ -150,12 +150,14 @@ class IxargsApp(App[None]):
         cmd_for_line: Callable[[str], list[str]],
         *,
         horizontal: bool = True,
+        list_size: None | int | str = None,
         **kwargs: object,
     ) -> None:
         super().__init__(**kwargs)
         self.lines = lines
         self.cmd_for_line = cmd_for_line
         self.horizontal = horizontal
+        self.list_size = list_size
         self._run_id = 0
         self._search_query: str | None = None
         self._search_matches: list[int] = []
@@ -193,13 +195,23 @@ class IxargsApp(App[None]):
         yield Footer()
 
     def on_mount(self) -> None:
+        list_scroll = self.query_one("#list-scroll", VerticalScroll)
         if self.horizontal:
-            # Size list panel to content width (line numbers + longest line), capped by CSS max-width 50%
-            content_width = 20  # minimum for "   1 " + short line
-            for line in self.lines:
-                content_width = max(content_width, 5 + len(line))
-            list_scroll = self.query_one("#list-scroll", VerticalScroll)
-            list_scroll.styles.min_width = content_width
+            if self.list_size is None:
+                # Auto fit: size list panel to content width (line numbers + longest line), capped by CSS max-width 50%
+                content_width = 20  # minimum for "   1 " + short line
+                for line in self.lines:
+                    content_width = max(content_width, 5 + len(line))
+                list_scroll.styles.min_width = content_width
+            elif isinstance(self.list_size, int):
+                list_scroll.styles.width = self.list_size
+            else:
+                list_scroll.styles.width = self.list_size  # e.g. "25%"
+        else:
+            if isinstance(self.list_size, int):
+                list_scroll.styles.height = self.list_size
+            else:
+                list_scroll.styles.height = self.list_size  # e.g. "25%"
         self.run_cmd_for_index(0)
 
     async def _run_capture_and_show(self, cmd: list[str], rid: int, idx: int) -> None:

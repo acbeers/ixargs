@@ -4,9 +4,24 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
 
 from ixargs.app import IxargsApp
+
+
+def _is_size_arg(s: str) -> bool:
+    """True if s looks like a size: digits or digits followed by %."""
+    return bool(re.match(r"^\d+%?$", s))
+
+
+def _parse_list_size(s: None | str) -> None | int | str:
+    """Parse list size: None → None; '40' → 40; '25%' → '25%' (str)."""
+    if s is None or s == "":
+        return None
+    if s.endswith("%"):
+        return s  # keep "25%" for app
+    return int(s)
 
 
 def _reconnect_stdin_to_tty() -> None:
@@ -38,7 +53,12 @@ def _find_command_start(argv: list[str]) -> int:
         arg = argv[i]
         if arg == "--":
             return i + 1  # command starts after --
-        if arg in ("-z", "-v", "-t"):
+        if arg in ("-z", "-v"):
+            i += 1
+            if i < len(argv) and _is_size_arg(argv[i]):
+                i += 1
+            continue
+        if arg == "-t":
             i += 1
             continue
         if arg == "-I":
@@ -64,6 +84,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         options_part = argv[:cmd_start]
         command_part = argv[cmd_start:]
 
+    _NOT_GIVEN = object()
+
     parser = argparse.ArgumentParser(
         prog="ixargs",
         description="Run commands against stdin lines in a split-pane TUI.",
@@ -71,16 +93,21 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "-z",
-        action="store_true",
-        default=True,
-        dest="horizontal",
-        help="Split horizontally (list on left). Default.",
+        nargs="?",
+        const=None,
+        default=_NOT_GIVEN,
+        dest="horizontal_opt",
+        metavar="COLS|%",
+        help="Split horizontally (list on left). Optional: COLS or %% (e.g. 40 or 25%%) for list width. Default: auto.",
     )
     parser.add_argument(
         "-v",
-        action="store_true",
-        dest="vertical",
-        help="Split vertically (list on top).",
+        nargs="?",
+        const=None,
+        default=_NOT_GIVEN,
+        dest="vertical_opt",
+        metavar="LINES|%",
+        help="Split vertically (list on top). Optional: LINES or %% (e.g. 10 or 25%%) for list height. Default: 10 lines.",
     )
     parser.add_argument(
         "-t",
@@ -100,8 +127,20 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parsed.cmd = command_part[0] if command_part else ""
     parsed.args = list(command_part[1:]) if len(command_part) > 1 else []
 
-    if parsed.vertical:
+    # Resolve layout and list_size from -z / -v
+    if parsed.vertical_opt is not _NOT_GIVEN:
         parsed.horizontal = False
+        parsed.list_size = _parse_list_size(parsed.vertical_opt)
+        # Vertical default when no arg: 10 lines
+        if parsed.list_size is None:
+            parsed.list_size = 10
+    elif parsed.horizontal_opt is not _NOT_GIVEN:
+        parsed.horizontal = True
+        parsed.list_size = _parse_list_size(parsed.horizontal_opt)
+        # Horizontal default when no arg: None (auto fit)
+    else:
+        parsed.horizontal = True
+        parsed.list_size = None
     return parsed
 
 
@@ -147,5 +186,6 @@ def main(argv: list[str] | None = None) -> None:
         lines=lines,
         cmd_for_line=cmd_for_line,
         horizontal=parsed.horizontal,
+        list_size=parsed.list_size,
     )
     app.run()
