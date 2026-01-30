@@ -1,15 +1,90 @@
-"""Run a command and capture stdout+stderr."""
+"""Run a command and capture stdout+stderr, with ANSI color when using a PTY."""
 
 from __future__ import annotations
 
+import errno
 import os
+import pty
+import select
 import subprocess
+import termios
+import tty
 
 
-def run_capture(cmd: list[str], env: dict[str, str] | None = None) -> str:
-    """Run command, capture stdout+stderr. Returns decoded str."""
-    env = dict(env) if env is not None else dict(os.environ)
+def _run_capture_pty(cmd: list[str], env: dict[str, str]) -> str:
+    """Capture via PTY so the child sees a TTY and emits color. Returns decoded str."""
+    master_fd, slave_fd = pty.openpty()
+    try:
+        try:
+            tty.setraw(slave_fd, termios.TCSANOW)
+        except (termios.error, OSError):
+            pass
 
+        proc = subprocess.Popen(
+            cmd,
+            stdout=slave_fd,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
+            env=env,
+            start_new_session=True,
+        )
+    except Exception:
+        os.close(slave_fd)
+        os.close(master_fd)
+        raise
+    os.close(slave_fd)
+
+    chunks: list[bytes] = []
+    try:
+        os.set_blocking(master_fd, False)
+        try:
+            while True:
+                r, _, _ = select.select([master_fd], [], [], 0.1)
+                if r:
+                    try:
+                        data = os.read(master_fd, 65536)
+                    except OSError as e:
+                        if e.errno not in (errno.EAGAIN, errno.EWOULDBLOCK):
+                            break
+                        data = None
+                    if data is not None:
+                        if not data:
+                            break
+                        chunks.append(data)
+                if proc.poll() is not None:
+                    while True:
+                        try:
+                            data = os.read(master_fd, 65536)
+                        except OSError as e:
+                            if e.errno in (errno.EAGAIN, errno.EWOULDBLOCK):
+                                break
+                            break
+                        if not data:
+                            break
+                        chunks.append(data)
+                    break
+        finally:
+            try:
+                os.set_blocking(master_fd, True)
+            except OSError:
+                pass
+        proc.wait()
+    finally:
+        try:
+            os.close(master_fd)
+        except OSError:
+            pass
+        try:
+            proc.wait(timeout=0.5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+
+    return b"".join(chunks).decode("utf-8", errors="replace")
+
+
+def _run_capture_pipe(cmd: list[str], env: dict[str, str]) -> str:
+    """Capture via PIPE (no color). Returns decoded str."""
     proc = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
@@ -21,3 +96,17 @@ def run_capture(cmd: list[str], env: dict[str, str] | None = None) -> str:
     assert proc.stdout is not None
     out, _ = proc.communicate()
     return out.decode("utf-8", errors="replace")
+
+
+def run_capture(cmd: list[str], env: dict[str, str] | None = None) -> str:
+    """Run command, capture stdout+stderr. Uses PTY for color when possible."""
+    env = dict(env) if env is not None else dict(os.environ)
+    env.setdefault("TERM", "xterm-256color")
+    # Disable interactive pagers so commands write to stdout instead of waiting for input.
+    # PAGER is used by many tools (man, hg, etc.); GIT_PAGER is used by git.
+    env["PAGER"] = "cat"
+    env["GIT_PAGER"] = "cat"
+    try:
+        return _run_capture_pty(cmd, env)
+    except (OSError, FileNotFoundError):
+        return _run_capture_pipe(cmd, env)
