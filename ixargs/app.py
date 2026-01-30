@@ -2,19 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
-from functools import partial
 from typing import Callable
 
 from rich.text import Text
-from textual import on
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Footer, Markdown, Static
-from textual.worker import Worker, WorkerState
 
 from ixargs.runner import run_capture
 
@@ -180,44 +178,38 @@ class IxargsApp(App[None]):
     def on_mount(self) -> None:
         self.run_cmd_for_index(0)
 
+    async def _run_capture_and_show(self, cmd: list[str], rid: int, idx: int) -> None:
+        """Run command in thread pool, then update output panel from main loop."""
+        try:
+            out = await asyncio.to_thread(run_capture, cmd)
+        except Exception as e:
+            out = f"(error)\n{e!s}"
+        if rid != self._run_id:
+            return
+        cmd_line = " $ " + " ".join(cmd) + "\n\n"
+        self._set_output(cmd_line + out, idx)
+
     def run_cmd_for_index(self, index: int) -> None:
-        out_panel = self.query_one("#output-panel", OutputPanel)
-        out_panel.set_output("Running...")
         line = self.lines[index]
         cmd = self.cmd_for_line(line)
+        out_panel = self.query_one("#output-panel", OutputPanel)
+        out_panel.set_output(" $ " + " ".join(cmd) + "\n\nRunning...")
         self._run_id += 1
         rid = self._run_id
-        worker = self.run_worker(
-            partial(run_capture, cmd),
-            thread=True,
+        self.run_worker(
+            self._run_capture_and_show(cmd, rid, index),
             exclusive=False,
             group="run",
         )
-        setattr(worker, "_ixargs_run_id", rid)
-        setattr(worker, "_ixargs_index", index)
 
-    @on(Worker.StateChanged)
-    def handle_worker_state_changed(self, msg: Worker.StateChanged) -> None:
-        if msg.state != WorkerState.SUCCESS:
-            return
-        w = msg.worker
-        rid = getattr(w, "_ixargs_run_id", None)
-        idx = getattr(w, "_ixargs_index", None)
-        if rid is None or idx is None:
-            return
-        if rid != self._run_id:
-            return
-        try:
-            out = w.result
-        except Exception:
-            out = "(error capturing output)"
-        out = out if isinstance(out, str) else str(out)
+    def _set_output(self, text: str, idx: int | None) -> None:
         out_panel = self.query_one("#output-panel", OutputPanel)
-        out_panel.set_output(out)
-        list_panel = self.query_one("#list-panel", ListPanel)
-        if list_panel.index == idx:
-            self._search_matches = []
-            self._search_query = None
+        out_panel.set_output(text)
+        if idx is not None:
+            list_panel = self.query_one("#list-panel", ListPanel)
+            if list_panel.index == idx:
+                self._search_matches = []
+                self._search_query = None
 
     def action_quit(self) -> None:
         self.exit()
