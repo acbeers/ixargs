@@ -33,6 +33,9 @@ ls | uv run ixargs -v head -5
 
 # Replace placeholder in args instead of appending
 printf 'foo\nbar\n' | uv run ixargs -I '{}' echo "file: {}"
+
+# Commands with option-like args (e.g. find -exec) work; use -- to separate if needed
+printf 'foo\nbar\n' | uv run ixargs -I '%' find . -exec grep % {} \\;
 ```
 
 ## Options
@@ -41,7 +44,10 @@ printf 'foo\nbar\n' | uv run ixargs -I '{}' echo "file: {}"
 |--------|-------------|
 | `-z` | Split horizontally (list on left). Default. |
 | `-v` | Split vertically (list on top). |
+| `-t` | Trim leading and trailing whitespace from each input line. |
 | `-I replstr` | Replace `replstr` in the args with each stdin line instead of appending it. |
+
+After ixargs options, the first remaining argument is the command; everything after is passed as arguments to it. Commands with option-like args (e.g. `find -exec`) work naturally. Use `--` to explicitly separate ixargs options from the command when the command itself starts with `-`.
 
 ## Keyboard shortcuts
 

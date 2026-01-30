@@ -26,11 +26,48 @@ def _reconnect_stdin_to_tty() -> None:
         os.close(tty_fd)
 
 
+def _find_command_start(argv: list[str]) -> int:
+    """Return index of the command (first non-option) in argv.
+
+    Only ixargs options (-z, -v, -t, -I) are consumed. Everything else,
+    including -type, -exec, etc., belongs to the command. This prevents
+    argparse from mis-parsing e.g. -type as -t.
+    """
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg == "--":
+            return i + 1  # command starts after --
+        if arg in ("-z", "-v", "-t"):
+            i += 1
+            continue
+        if arg == "-I":
+            i += 2
+            if i > len(argv):
+                return len(argv)  # -I at end, no command
+            continue
+        # Not an ixargs option - this is the command
+        return i
+    return len(argv)
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    argv = argv if argv is not None else sys.argv[1:]
+
+    # Support -- to explicitly separate ixargs options from the command
+    if "--" in argv:
+        sep_idx = argv.index("--")
+        options_part = argv[:sep_idx]
+        command_part = argv[sep_idx + 1:]
+    else:
+        cmd_start = _find_command_start(argv)
+        options_part = argv[:cmd_start]
+        command_part = argv[cmd_start:]
+
     parser = argparse.ArgumentParser(
         prog="ixargs",
         description="Run commands against stdin lines in a split-pane TUI.",
-        epilog="Example: some_tool | ixargs -z cat",
+        epilog="Example: some_tool | ixargs -z cat. Use -- to separate ixargs options from command args that look like options (e.g. find -exec).",
     )
     parser.add_argument(
         "-z",
@@ -58,17 +95,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Replace replstr in args with each stdin line instead of appending it.",
     )
-    parser.add_argument(
-        "cmd",
-        help="Command to run for each line.",
-    )
-    parser.add_argument(
-        "args",
-        nargs="*",
-        metavar="arg",
-        help="Arguments to pass to the command.",
-    )
-    parsed = parser.parse_args(argv)
+
+    parsed, _ = parser.parse_known_args(options_part)
+    parsed.cmd = command_part[0] if command_part else ""
+    parsed.args = list(command_part[1:]) if len(command_part) > 1 else []
+
     if parsed.vertical:
         parsed.horizontal = False
     return parsed
