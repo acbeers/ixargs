@@ -46,6 +46,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Split vertically (list on top).",
     )
     parser.add_argument(
+        "-t",
+        action="store_true",
+        dest="trim",
+        help="Trim leading and trailing whitespace from each input line.",
+    )
+    parser.add_argument(
         "-I",
         dest="replstr",
         metavar="replstr",
@@ -68,9 +74,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parsed
 
 
-def read_stdin_lines() -> list[str]:
-    """Read and return non-empty trimmed lines from stdin."""
-    return [line.rstrip("\n") for line in sys.stdin.readlines() if line.strip()]
+def read_stdin_lines(trim: bool = False) -> list[str]:
+    """Read and return non-empty lines from stdin.
+
+    If trim is True, strip leading and trailing whitespace from each line.
+    """
+    lines = [line.rstrip("\n") for line in sys.stdin.readlines()]
+    if trim:
+        lines = [line.strip() for line in lines]
+    return [line for line in lines if (line if trim else line.strip())]
 
 
 def build_cmd(parsed: argparse.Namespace, line: str) -> list[str]:
@@ -91,7 +103,7 @@ def main(argv: list[str] | None = None) -> None:
     if not parsed.cmd:
         sys.exit("ixargs: command required. Usage: ... | ixargs [options] cmd [args...]")
 
-    lines = read_stdin_lines()
+    lines = read_stdin_lines(trim=parsed.trim)
     if not lines:
         sys.exit("ixargs: no input lines from stdin.")
 
