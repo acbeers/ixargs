@@ -59,6 +59,21 @@ def make_list_content(lines: list[str], index: int, width: int) -> Text:
     return t
 
 
+class ListScrollContainer(VerticalScroll):
+    """VerticalScroll that delegates up/down arrow keys to the app for line selection."""
+
+    BINDINGS = [
+        Binding("down", "line_down", "Down", show=False),
+        Binding("up", "line_up", "Up", show=False),
+    ]
+
+    def action_line_down(self) -> None:
+        self.app.action_line_down()
+
+    def action_line_up(self) -> None:
+        self.app.action_line_up()
+
+
 class ListPanel(Static):
     """Left/top panel showing stdin lines."""
 
@@ -150,7 +165,7 @@ class IxargsApp(App[None]):
         root: Horizontal | Vertical
         if self.horizontal:
             root = Horizontal(
-                VerticalScroll(
+                ListScrollContainer(
                     ListPanel(self.lines, 0, id="list-panel"),
                     id="list-scroll",
                 ),
@@ -163,7 +178,7 @@ class IxargsApp(App[None]):
             )
         else:
             root = Vertical(
-                VerticalScroll(
+                ListScrollContainer(
                     ListPanel(self.lines, 0, id="list-panel"),
                     id="list-scroll",
                 ),
