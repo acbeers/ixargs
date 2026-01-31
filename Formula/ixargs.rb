@@ -46,6 +46,7 @@ class Ixargs < Formula
 
   def install
     virtualenv_install_with_resources
+    man1.install "man/ixargs.1"
   end
 
   test do

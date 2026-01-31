@@ -20,3 +20,6 @@ packages = ["ixargs"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "ixargs/app.css" = "ixargs/app.css"
+
+[tool.hatch.build.targets.sdist]
+include = ["ixargs", "man/**", "pyproject.toml", "README.md"]

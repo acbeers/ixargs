@@ -1,0 +1,141 @@
+.\" ixargs man page
+.TH IXARGS 1 "" "ixargs"
+.SH NAME
+ixargs \- interactive xargs: run commands against stdin lines in a split-pane TUI
+.SH SYNOPSIS
+.B ixargs
+[\fIoptions\fR]
+.I cmd
+[\fIargs\fR...]
+.PP
+.B ixargs
+[\fIoptions\fR]
+.B \-\-
+.I cmd
+[\fIargs\fR...]
+.SH DESCRIPTION
+.B ixargs
+reads lines from standard input and runs a command for each line in an interactive
+split-pane TUI. Select a line to run the command with that input; output appears
+in the adjacent pane with scrolling and color preserved.
+.PP
+The first non-option argument (or the first after
+.B \-\- )
+is the command; remaining arguments are passed to it. Use
+.B \-\-
+to separate ixargs options from command arguments that look like options (e.g.
+.BR find (1)
+with
+.BR \-exec ).
+.SH OPTIONS
+.TP
+.BR \-z " [" \fICOLS\fR|\fI%\fR]
+Split horizontally (list on left, output on right). Optional
+.I COLS
+or percentage (e.g.
+.B 40
+or
+.B 25% )
+sets the list width; default is automatic.
+.TP
+.BR \-v " [" \fILINES\fR|\fI%\fR]
+Split vertically (list on top, output below). Optional
+.I LINES
+or percentage (e.g.
+.B 10
+or
+.B 25% )
+sets the list height; default is 10 lines.
+.TP
+.B \-t
+Trim leading and trailing whitespace from each input line.
+.TP
+.BR \-I \fI replstr\fR
+Replace
+.I replstr
+in the command arguments with each stdin line instead of appending the line.
+.SH KEYBOARD SHORTCUTS
+.TP
+.B j
+/
+.B \(da
+Next line
+.TP
+.B k
+/
+.B \(ua
+Previous line
+.TP
+.B Space
+Next page
+.TP
+.B b
+Previous page
+.TP
+.B <
+Top of output
+.TP
+.B >
+Bottom of output
+.TP
+.B q
+Quit
+.TP
+.B ?
+Help
+.TP
+.B /
+Search (stub)
+.TP
+.BR n " / " N
+Search next / previous
+.SH EXAMPLES
+.PP
+Run
+.B echo
+for each line:
+.RS
+.EX
+printf 'a\enb\enc\en' | ixargs echo
+.EE
+.RE
+.PP
+Horizontal split (list left), run
+.B wc \-l
+on each file:
+.RS
+.EX
+ls | ixargs -z wc -l
+.EE
+.RE
+.PP
+Vertical split (list top), run
+.B head \-5
+on each:
+.RS
+.EX
+ls | ixargs -v head -5
+.EE
+.RE
+.PP
+Replace a placeholder in the arguments:
+.RS
+.EX
+printf 'foo\enbar\en' | ixargs -I '{}' echo "file: {}"
+.EE
+.RE
+.PP
+Use
+.B \-\-
+when the command has option-like args:
+.RS
+.EX
+printf 'foo\enbar\en' | ixargs -I '%' -- find . -exec grep % {} \e;
+.EE
+.RE
+.SH SEE ALSO
+.BR xargs (1)
+.SH BUGS
+Report bugs at: https://github.com/acbeers/ixargs/issues
+.SH LICENSE
+MIT
