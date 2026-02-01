@@ -133,6 +133,36 @@ when the command has option-like args:
 printf 'foo\enbar\en' | ixargs -I '%' -- find . -exec grep % {} \e;
 .EE
 .RE
+.PP
+Show per-file diffs versus
+.B main
+for changed files:
+.RS
+.EX
+git diff --name-only main..HEAD | ixargs git diff main..HEAD --
+.EE
+.RE
+.PP
+Show staged diffs (what will be committed):
+.RS
+.EX
+git diff --name-only --cached | ixargs git diff --cached --
+.EE
+.RE
+.PP
+Search a list of patterns with ripgrep:
+.RS
+.EX
+cat strings.txt | ixargs rg
+.EE
+.RE
+.PP
+List open files for a set of processes:
+.RS
+.EX
+ps -o pid | sed 1d | ixargs -t lsof -p
+.EE
+.RE
 .SH SEE ALSO
 .BR xargs (1)
 .SH BUGS
