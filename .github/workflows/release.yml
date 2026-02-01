@@ -28,12 +28,26 @@ jobs:
 
       - name: Rename tarball for release
         run: |
+          set -euo pipefail
           # Extract version from tag (e.g., v0.1.0 -> 0.1.0)
           VERSION=${GITHUB_REF_NAME#v}
+          TARGET="dist/ixargs-${VERSION}.tar.gz"
+
           # Find the built tarball (e.g., ixargs-0.1.0.tar.gz)
-          TARBALL=$(ls dist/ixargs-*.tar.gz)
-          # Copy to predictable name for release
-          cp "$TARBALL" "dist/ixargs-${VERSION}.tar.gz"
+          shopt -s nullglob
+          TARBALLS=(dist/ixargs-*.tar.gz)
+          if [ "${#TARBALLS[@]}" -eq 0 ]; then
+            echo "No tarballs found in dist/" >&2
+            exit 1
+          fi
+          TARBALL="${TARBALLS[0]}"
+
+          # Copy to predictable name for release (skip if already correct)
+          if [ "$TARBALL" != "$TARGET" ]; then
+            cp "$TARBALL" "$TARGET"
+          else
+            echo "Tarball already named $TARGET; skipping copy."
+          fi
           ls -la dist/
 
       - name: Upload artifact
