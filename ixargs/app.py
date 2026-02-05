@@ -22,7 +22,7 @@ from ixargs.runner import run_capture_streaming
 HELP_MARKDOWN = """
 # ixargs shortcuts
 
-**Input list** (focus on left/top panel):
+**Input list** (j/k/arrows always move selection):
 | Key | Action |
 |-----|--------|
 | `j` / `k` / `↑` / `↓` | Next / previous line |
@@ -69,20 +69,9 @@ def make_list_content(lines: list[str], index: int, width: int) -> Text:
 
 
 class ListScrollContainer(VerticalScroll):
-    """VerticalScroll that handles j/k/up/down for line selection (input list)."""
+    """VerticalScroll for input list. Navigation via app-level j/k/up/down bindings."""
 
-    BINDINGS = [
-        Binding("j", "line_down", "Down", show=False),
-        Binding("k", "line_up", "Up", show=False),
-        Binding("down", "line_down", "Down", show=False),
-        Binding("up", "line_up", "Up", show=False),
-    ]
-
-    def action_line_down(self) -> None:
-        self.app.action_line_down()
-
-    def action_line_up(self) -> None:
-        self.app.action_line_up()
+    can_focus = False
 
 
 class ListPanel(Static):
@@ -110,35 +99,14 @@ class ListPanel(Static):
 
 
 class OutputScrollContainer(VerticalScroll):
-    """VerticalScroll that handles space/b/</> for output panel scrolling."""
+    """VerticalScroll for output panel. Scrolling via app-level space/b/</> bindings."""
 
-    BINDINGS = [
-        Binding("space", "page_down", "Page down", show=False),
-        Binding("b", "page_up", "Page up", show=False),
-        Binding("<", "scroll_home", "Top", show=False),
-        Binding(">", "scroll_end", "Bottom", show=False),
-    ]
+    can_focus = False
 
     def _mark_scrolling(self) -> None:
-        """Notify app that user is scrolling."""
+        """Notify app that user is scrolling (e.g. mouse wheel)."""
         if hasattr(self.app, "_mark_user_scrolling"):
             self.app._mark_user_scrolling()
-
-    def action_page_down(self) -> None:
-        self._mark_scrolling()
-        self.scroll_page_down(animate=False)
-
-    def action_page_up(self) -> None:
-        self._mark_scrolling()
-        self.scroll_page_up(animate=False)
-
-    def action_scroll_home(self) -> None:
-        self._mark_scrolling()
-        self.scroll_home(animate=False, immediate=True)
-
-    def action_scroll_end(self) -> None:
-        self._mark_scrolling()
-        self.scroll_end(animate=False, immediate=True)
 
     def action_scroll_down(self) -> None:
         """Override default scroll_down to mark scrolling."""
@@ -184,6 +152,10 @@ class IxargsApp(App[None]):
     BINDINGS = [
         ("q", "quit", "Quit"),
         ("?", "help", "Help"),
+        Binding("j", "line_down", "Line down", show=False),
+        Binding("k", "line_up", "Line up", show=False),
+        Binding("down", "line_down", "Line down", show=False),
+        Binding("up", "line_up", "Line up", show=False),
         Binding("space", "output_page_down", "Output page down", show=False),
         Binding("b", "output_page_up", "Output page up", show=False),
         Binding("<", "output_top", "Output top", show=False),
@@ -248,7 +220,6 @@ class IxargsApp(App[None]):
 
     def on_mount(self) -> None:
         list_scroll = self.query_one("#list-scroll", ListScrollContainer)
-        self.set_focus(list_scroll)
         if self.horizontal:
             if self.list_size is None:
                 # Auto fit: size list panel to content width (line numbers + longest line), capped by CSS max-width 50%
