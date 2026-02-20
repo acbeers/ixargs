@@ -4,14 +4,31 @@ from __future__ import annotations
 
 import codecs
 import errno
+import fcntl
 import os
 import pty
 import select
+import struct
 import subprocess
 import termios
 import threading
 import tty
 from collections.abc import Callable
+
+
+def _set_pty_winsize(slave_fd: int, width: int, height: int) -> None:
+    """Set the PTY window size so child processes (e.g. delta) see correct dimensions."""
+    if width <= 0 or height <= 0:
+        return
+    try:
+        tiocswinsz = getattr(termios, "TIOCSWINSZ", None)
+        if tiocswinsz is None:
+            return
+        # winsize: (ws_row, ws_col, ws_xpixel, ws_ypixel)
+        buf = struct.pack("HHHH", height, width, 0, 0)
+        fcntl.ioctl(slave_fd, tiocswinsz, buf)
+    except (OSError, struct.error):
+        pass
 
 
 def _run_capture_pty(cmd: list[str], env: dict[str, str]) -> str:
@@ -101,14 +118,43 @@ def _run_capture_pipe(cmd: list[str], env: dict[str, str]) -> str:
     return out.decode("utf-8", errors="replace")
 
 
+def _effective_git_pager(env: dict[str, str]) -> str | None:
+    """Return the git pager command if it is delta (so we can use it with DELTA_PAGER=cat)."""
+    pager = env.get("GIT_PAGER", "").strip()
+    if not pager:
+        try:
+            r = subprocess.run(
+                ["git", "config", "--get", "core.pager"],
+                capture_output=True,
+                text=True,
+                timeout=2,
+                env=env,
+            )
+            if r.returncode == 0 and r.stdout:
+                pager = r.stdout.strip()
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    if pager and "delta" in pager.lower():
+        return pager
+    return None
+
+
+def _apply_pager_env(env: dict[str, str]) -> None:
+    """Set PAGER/GIT_PAGER so output is non-interactive; use delta with DELTA_PAGER=cat when configured."""
+    git_pager = _effective_git_pager(env)
+    if git_pager is not None:
+        env["GIT_PAGER"] = git_pager
+        env["DELTA_PAGER"] = "cat"
+    else:
+        env["GIT_PAGER"] = "cat"
+    env["PAGER"] = "cat"
+
+
 def run_capture(cmd: list[str], env: dict[str, str] | None = None) -> str:
     """Run command, capture stdout+stderr. Uses PTY for color when possible."""
     env = dict(env) if env is not None else dict(os.environ)
     env.setdefault("TERM", "xterm-256color")
-    # Disable interactive pagers so commands write to stdout instead of waiting for input.
-    # PAGER is used by many tools (man, hg, etc.); GIT_PAGER is used by git.
-    env["PAGER"] = "cat"
-    env["GIT_PAGER"] = "cat"
+    _apply_pager_env(env)
     try:
         return _run_capture_pty(cmd, env)
     except (OSError, FileNotFoundError):
@@ -137,6 +183,9 @@ def _run_streaming_pty(
     env: dict[str, str],
     on_chunk: Callable[[str], None],
     cancel_event: threading.Event | None = None,
+    *,
+    width: int | None = None,
+    height: int | None = None,
 ) -> None:
     """Stream command output via PTY. Calls on_chunk for each decoded piece."""
     master_fd, slave_fd = pty.openpty()
@@ -145,6 +194,8 @@ def _run_streaming_pty(
             tty.setraw(slave_fd, termios.TCSANOW)
         except (termios.error, OSError):
             pass
+        if width is not None and height is not None:
+            _set_pty_winsize(slave_fd, width, height)
 
         proc = subprocess.Popen(
             cmd,
@@ -268,13 +319,20 @@ def run_capture_streaming(
     on_chunk: Callable[[str], None],
     env: dict[str, str] | None = None,
     cancel_event: threading.Event | None = None,
+    *,
+    width: int | None = None,
+    height: int | None = None,
 ) -> None:
     """Run command and stream stdout+stderr by calling on_chunk for each piece."""
     env = dict(env) if env is not None else dict(os.environ)
     env.setdefault("TERM", "xterm-256color")
-    env["PAGER"] = "cat"
-    env["GIT_PAGER"] = "cat"
+    _apply_pager_env(env)
+    if width is not None and width > 0 and height is not None and height > 0:
+        env["COLUMNS"] = str(width)
+        env["LINES"] = str(height)
     try:
-        _run_streaming_pty(cmd, env, on_chunk, cancel_event)
+        _run_streaming_pty(
+            cmd, env, on_chunk, cancel_event, width=width, height=height
+        )
     except (OSError, FileNotFoundError):
         _run_streaming_pipe(cmd, env, on_chunk, cancel_event)

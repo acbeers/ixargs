@@ -26,6 +26,7 @@ HELP_MARKDOWN = """
 | Key | Action |
 |-----|--------|
 | `j` / `k` / `↑` / `↓` | Next / previous line |
+| `J` / `K` | Next / previous page |
 
 **Output panel** (scroll output from anywhere):
 | Key | Action |
@@ -154,6 +155,8 @@ class IxargsApp(App[None]):
         ("?", "help", "Help"),
         Binding("j", "line_down", "Line down", show=False),
         Binding("k", "line_up", "Line up", show=False),
+        Binding("J", "list_page_down", "Page down", show=False),
+        Binding("K", "list_page_up", "Page up", show=False),
         Binding("down", "line_down", "Line down", show=False),
         Binding("up", "line_up", "Line up", show=False),
         Binding("space", "output_page_down", "Output page down", show=False),
@@ -238,7 +241,9 @@ class IxargsApp(App[None]):
                 list_scroll.styles.height = self.list_size  # e.g. "25%"
         self.run_cmd_for_index(0)
 
-    async def _run_capture_and_show(self, cmd: list[str], rid: int, idx: int) -> None:
+    async def _run_capture_and_show(
+        self, cmd: list[str], rid: int, idx: int, width: int, height: int
+    ) -> None:
         """Run command in thread pool, streaming output to the UI as it arrives."""
         loop = asyncio.get_running_loop()
         cmd_line = " $ " + " ".join(cmd) + "\n\n"
@@ -273,12 +278,29 @@ class IxargsApp(App[None]):
 
         def run_streaming() -> None:
             try:
-                run_capture_streaming(cmd, on_chunk, cancel_event=self._cancel_run)
+                run_capture_streaming(
+                    cmd,
+                    on_chunk,
+                    cancel_event=self._cancel_run,
+                    width=width,
+                    height=height,
+                )
             except Exception as e:
                 chunks.append(f"(error)\n{e!s}")
             schedule_update(force=True)  # Final update (catches throttled tail + errors)
 
         await asyncio.to_thread(run_streaming)
+
+    def _output_panel_size(self) -> tuple[int, int]:
+        """Return (width, height) of the output panel for subprocess terminal size."""
+        try:
+            scroll = self.query_one("#output-scroll", OutputScrollContainer)
+            w, h = scroll.size.width, scroll.size.height
+            if w > 0 and h > 0:
+                return (w, h)
+        except Exception:
+            pass
+        return (80, 24)
 
     def run_cmd_for_index(self, index: int) -> None:
         line = self.lines[index]
@@ -288,8 +310,9 @@ class IxargsApp(App[None]):
         self._cancel_run.clear()
         self._run_id += 1
         rid = self._run_id
+        width, height = self._output_panel_size()
         self.run_worker(
-            self._run_capture_and_show(cmd, rid, index),
+            self._run_capture_and_show(cmd, rid, index, width, height),
             exclusive=False,
             group="run",
         )
@@ -333,6 +356,37 @@ class IxargsApp(App[None]):
         if lp.index <= 0:
             return
         n = lp.index - 1
+        lp.set_index(n)
+        self._scroll_list_to(n)
+        self.run_cmd_for_index(n)
+
+    def _list_page_size(self) -> int:
+        """Visible lines in the list panel (for J/K page movement)."""
+        try:
+            scroll = self.query_one("#list-scroll", ListScrollContainer)
+            h = scroll.size.height
+            if h > 0:
+                return h
+        except Exception:
+            pass
+        return 10
+
+    def action_list_page_down(self) -> None:
+        lp = self.query_one("#list-panel", ListPanel)
+        page = self._list_page_size()
+        n = min(lp.index + page, len(self.lines) - 1)
+        if n == lp.index:
+            return
+        lp.set_index(n)
+        self._scroll_list_to(n)
+        self.run_cmd_for_index(n)
+
+    def action_list_page_up(self) -> None:
+        lp = self.query_one("#list-panel", ListPanel)
+        page = self._list_page_size()
+        n = max(lp.index - page, 0)
+        if n == lp.index:
+            return
         lp.set_index(n)
         self._scroll_list_to(n)
         self.run_cmd_for_index(n)
