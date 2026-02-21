@@ -7,6 +7,7 @@ import os
 import re
 import sys
 
+from ixargs import __version__
 from ixargs.app import IxargsApp
 
 
@@ -92,6 +93,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         epilog="Example: some_tool | ixargs -z cat. Use -- to separate ixargs options from command args that look like options (e.g. find -exec).",
     )
     parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
+    )
+    parser.add_argument(
         "-z",
         nargs="?",
         const=None,
@@ -170,6 +176,7 @@ def build_cmd(parsed: argparse.Namespace, line: str) -> list[str]:
 
 def main(argv: list[str] | None = None) -> None:
     parsed = parse_args(argv)
+    # --version is handled by argparse; we only reach here when a command is required
     if not parsed.cmd:
         sys.exit("ixargs: command required. Usage: ... | ixargs [options] cmd [args...]")
 
