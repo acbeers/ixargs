@@ -54,6 +54,9 @@ def _find_command_start(argv: list[str]) -> int:
         arg = argv[i]
         if arg == "--":
             return i + 1  # command starts after --
+        if arg in ("--version", "-V"):
+            i += 1
+            continue
         if arg in ("-z", "-v"):
             i += 1
             if i < len(argv) and _is_size_arg(argv[i]):
@@ -93,6 +96,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         epilog="Example: some_tool | ixargs -z cat. Use -- to separate ixargs options from command args that look like options (e.g. find -exec).",
     )
     parser.add_argument(
+        "-V",
         "--version",
         action="version",
         version=f"%(prog)s {__version__}",
